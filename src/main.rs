@@ -96,6 +96,9 @@ fn should_ignore_namespace(namespace: &str, ignored: &HashSet<String>) -> bool {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install rustls crypto provider
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     tracing_subscriber::fmt::init();
 
     let slack_webhook_url =
@@ -115,9 +118,11 @@ async fn main() -> anyhow::Result<()> {
 
     futures::pin_mut!(watcher);
 
+    let mut init_violations: Vec<(String, String)> = Vec::new();
+
     while let Some(event) = watcher.try_next().await? {
         match event {
-            Event::Applied(deployment) => {
+            Event::Apply(deployment) => {
                 let name = deployment.metadata.name.as_deref().unwrap_or("unknown");
                 let namespace = deployment
                     .metadata
@@ -140,41 +145,45 @@ async fn main() -> anyhow::Result<()> {
                     info!("Deployment {}/{} has nodeSelector set", namespace, name);
                 }
             }
-            Event::Deleted(deployment) => {
+            Event::Delete(deployment) => {
                 let name = deployment.metadata.name.as_deref().unwrap_or("unknown");
                 info!("Deployment deleted: {}", name);
             }
-            Event::Restarted(deployments) => {
-                info!(
-                    "Watcher restarted, checking {} deployments",
-                    deployments.len()
-                );
+            Event::Init => {
+                info!("Watcher initializing, collecting deployments");
+                init_violations.clear();
+            }
+            Event::InitApply(deployment) => {
+                let name = deployment.metadata.name.as_deref().unwrap_or("unknown");
+                let namespace = deployment
+                    .metadata
+                    .namespace
+                    .as_deref()
+                    .unwrap_or("default");
 
-                let mut violations: Vec<(String, String)> = Vec::new();
-
-                for deployment in deployments {
-                    let name = deployment.metadata.name.as_deref().unwrap_or("unknown");
-                    let namespace = deployment
-                        .metadata
-                        .namespace
-                        .as_deref()
-                        .unwrap_or("default");
-
-                    if should_ignore_namespace(namespace, &ignored_namespaces) {
-                        continue;
-                    }
-
-                    if !has_node_selector(&deployment) {
-                        warn!("Deployment {}/{} has no nodeSelector", namespace, name);
-                        violations.push((namespace.to_string(), name.to_string()));
-                    }
+                if should_ignore_namespace(namespace, &ignored_namespaces) {
+                    continue;
                 }
 
+                if !has_node_selector(&deployment) {
+                    warn!("Deployment {}/{} has no nodeSelector", namespace, name);
+                    init_violations.push((namespace.to_string(), name.to_string()));
+                }
+            }
+            Event::InitDone => {
+                info!(
+                    "Watcher initialization complete, found {} violations",
+                    init_violations.len()
+                );
+
                 if let Err(e) =
-                    send_slack_batch_notification(&slack_webhook_url, &env_name, &violations).await
+                    send_slack_batch_notification(&slack_webhook_url, &env_name, &init_violations)
+                        .await
                 {
                     error!("Failed to send batch Slack notification: {}", e);
                 }
+
+                init_violations.clear();
             }
         }
     }
