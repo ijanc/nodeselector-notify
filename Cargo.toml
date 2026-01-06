@@ -1,0 +1,16 @@
+[package]
+name = "nodeselector-notify"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+kube = { version = "0.87", features = ["runtime", "client", "derive"] }
+k8s-openapi = { version = "0.20", features = ["v1_28"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

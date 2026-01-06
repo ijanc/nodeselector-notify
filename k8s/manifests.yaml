@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nodeselector-notify
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nodeselector-notify
+  namespace: nodeselector-notify
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nodeselector-notify
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nodeselector-notify
+  namespace: nodeselector-notify
+type: Opaque
+stringData:
+  slack-webhook-url: "https://hooks.slack.com/services/CHANGE_ME"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nodeselector-notify
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nodeselector-notify
+subjects:
+  - kind: ServiceAccount
+    name: nodeselector-notify
+    namespace: nodeselector-notify
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodeselector-notify
+  namespace: nodeselector-notify
+  labels:
+    app: nodeselector-notify
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nodeselector-notify
+  template:
+    metadata:
+      labels:
+        app: nodeselector-notify
+    spec:
+      serviceAccountName: nodeselector-notify
+      containers:
+        - name: nodeselector-notify
+          image: nodeselector-notify:latest
+          env:
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: nodeselector-notify
+                  key: slack-webhook-url
+            - name: ENV
+              value: "prod"
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
